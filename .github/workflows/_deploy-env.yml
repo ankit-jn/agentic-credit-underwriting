@@ -1,0 +1,130 @@
+# Purpose: reusable job deploying one environment: ECR, image build, terraform apply, Knowledge Base sync, Cedar policies, demo seed (non-prod), eval gate, SPA publish, smoke test.
+name: Deploy environment (reusable)
+on:
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: infra/terraform
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04-arm   # native arm64 build for AgentCore Runtime
+    environment: ${{ inputs.environment }}
+    concurrency: deploy-${{ inputs.environment }}
+    env:
+      TF_VAR_environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5, terraform_wrapper: false }
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=uw-agent/${{ inputs.environment }}.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="use_lockfile=true"
+
+      # Phase 1: the ECR repo must exist before we can push the image the Runtime points at.
+      - name: Terraform apply (ECR only)
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -target=module.ecr -var-file=envs/${{ inputs.environment }}.tfvars
+
+      - name: Build & push agent image
+        id: image
+        run: |
+          REPO=$(terraform -chdir=${{ env.TF_DIR }} output -raw ecr_repository_url)
+          TAG=${GITHUB_SHA::12}
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%%/*}"
+          docker build -t "$REPO:$TAG" backend/agent
+          docker push "$REPO:$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Phase 2: everything else, with the new image tag
+      - name: Terraform apply (full)
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -var-file=envs/${{ inputs.environment }}.tfvars -var image_tag=${{ steps.image.outputs.tag }}
+
+      - name: Capture outputs
+        id: tf
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          for k in name_prefix frontend_bucket frontend_distribution frontend_url api_url cognito_domain cognito_authority \
+                   spa_client_id knowledge_base_id kb_data_source_id gateway_arn policy_engine_id bedrock_model_id dashboard_name; do
+            echo "$k=$(terraform output -raw $k)" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Enable CloudWatch Transaction Search (AgentCore Observability, idempotent)
+        run: aws xray update-trace-segment-destination --destination CloudWatchLogs || true
+
+      - name: Sync Knowledge Base (and wait)
+        run: |
+          JOB=$(aws bedrock-agent start-ingestion-job \
+            --knowledge-base-id "${{ steps.tf.outputs.knowledge_base_id }}" \
+            --data-source-id "${{ steps.tf.outputs.kb_data_source_id }}" \
+            --query ingestionJob.ingestionJobId --output text)
+          for i in $(seq 1 30); do
+            S=$(aws bedrock-agent get-ingestion-job --knowledge-base-id "${{ steps.tf.outputs.knowledge_base_id }}" \
+              --data-source-id "${{ steps.tf.outputs.kb_data_source_id }}" --ingestion-job-id "$JOB" --query ingestionJob.status --output text)
+            echo "ingestion: $S"; [ "$S" = COMPLETE ] && exit 0; [ "$S" = FAILED ] && exit 1; sleep 10
+          done; exit 1
+
+      - name: Apply Cedar policies to AgentCore Policy engine
+        run: |
+          pip install -q boto3
+          python scripts/apply_policies.py "${{ steps.tf.outputs.policy_engine_id }}" "${{ steps.tf.outputs.gateway_arn }}" "$AWS_REGION"
+
+      - name: Seed demo data (non-prod only)
+        if: inputs.environment != 'prod'
+        run: |
+          pip install -q boto3
+          python scripts/seed_data.py "${{ steps.tf.outputs.name_prefix }}"
+
+      - name: Offline agent evals (golden cases, real model + KB) - gate for promotion
+        if: inputs.environment != 'prod'
+        env:
+          BEDROCK_MODEL_ID: ${{ steps.tf.outputs.bedrock_model_id }}
+          KNOWLEDGE_BASE_ID: ${{ steps.tf.outputs.knowledge_base_id }}
+        working-directory: backend/agent
+        run: |
+          pip install -q -r requirements.txt
+          python -m evals.run_evals --min-pass 0.8
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: frontend/package-lock.json }
+
+      - name: Build SPA
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ steps.tf.outputs.api_url }}
+          VITE_COGNITO_AUTHORITY: ${{ steps.tf.outputs.cognito_authority }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.spa_client_id }}
+          VITE_COGNITO_DOMAIN: ${{ steps.tf.outputs.cognito_domain }}
+        run: npm ci && npm run build
+
+      - name: Publish SPA
+        run: |
+          aws s3 sync frontend/dist "s3://${{ steps.tf.outputs.frontend_bucket }}" --delete --cache-control "public,max-age=300"
+          aws cloudfront create-invalidation --distribution-id "${{ steps.tf.outputs.frontend_distribution }}" --paths "/*"
+
+      - name: Smoke test (unauthenticated API must be rejected)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.api_url }}/applications")
+          [ "$code" = "401" ] || { echo "expected 401, got $code"; exit 1; }
+          echo "Deployed: ${{ steps.tf.outputs.frontend_url }}"
+          echo "Dashboard: https://${AWS_REGION}.console.aws.amazon.com/cloudwatch/home?region=${AWS_REGION}#dashboards:name=${{ steps.tf.outputs.dashboard_name }}"

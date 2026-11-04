@@ -1,0 +1,33 @@
+# Purpose: release pipeline: deploys dev, then prod (gated by the GitHub environment), running the regression evals as a promotion gate.
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  id-token: write   # GitHub OIDC -> AWS (no static keys)
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: infra/terraform
+
+jobs:
+  deploy-dev:
+    if: github.event_name == 'push' || inputs.environment == 'dev'
+    uses: ./.github/workflows/_deploy-env.yml
+    with: { environment: dev }
+    secrets: inherit
+
+  deploy-prod:
+    needs: deploy-dev
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'
+    uses: ./.github/workflows/_deploy-env.yml   # 'prod' GitHub environment holds the manual-approval rule
+    with: { environment: prod }
+    secrets: inherit

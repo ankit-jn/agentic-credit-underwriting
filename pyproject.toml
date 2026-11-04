@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["backend/agent/tests"]
+pythonpath = ["backend/agent"]

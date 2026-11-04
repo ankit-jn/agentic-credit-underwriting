@@ -1,0 +1,189 @@
+{
+  "Comment": "Durable human-approval workflow: waits for a reviewer, reminds, escalates and finally expires safely (refers, never decides).",
+  "StartAt": "PlanSchedule",
+  "TimeoutSeconds": 1209600,
+  "States": {
+    "PlanSchedule": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${actions_arn}",
+        "Payload": { "action": "PLAN", "task.$": "$.task", "execution_id.$": "$$.Execution.Id" }
+      },
+      "ResultSelector": { "schedule.$": "$.Payload.schedule", "deadline.$": "$.Payload.deadline" },
+      "ResultPath": "$.plan",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"], "IntervalSeconds": 2, "MaxAttempts": 4, "BackoffRate": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PublishWorkflowFailed" }],
+      "Next": "InitIndex"
+    },
+    "InitIndex": { "Type": "Pass", "Result": 0, "ResultPath": "$.idx", "Next": "SelectSegment" },
+    "SelectSegment": {
+      "Type": "Pass",
+      "Parameters": {
+        "task.$": "$.task",
+        "plan.$": "$.plan",
+        "idx.$": "$.idx",
+        "segment.$": "States.ArrayGetItem($.plan.schedule, $.idx)"
+      },
+      "Next": "WaitForReviewer"
+    },
+    "WaitForReviewer": {
+      "Type": "Task",
+      "Comment": "Parks here (up to the segment length) until the reviewer's decision calls SendTaskSuccess; on timeout the ladder advances.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${actions_arn}",
+        "Payload": {
+          "action": "REGISTER_TOKEN",
+          "task.$": "$.task",
+          "token.$": "$$.Task.Token",
+          "execution_id.$": "$$.Execution.Id",
+          "idx.$": "$.idx"
+        }
+      },
+      "TimeoutSecondsPath": "$.segment.wait_seconds",
+      "ResultPath": "$.outcome",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 3, "MaxAttempts": 3, "BackoffRate": 2 }],
+      "Catch": [
+        { "ErrorEquals": ["States.Timeout"], "ResultPath": null, "Next": "AfterTimeout" },
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PublishWorkflowFailed" }
+      ],
+      "Next": "PublishCompleted"
+    },
+    "AfterTimeout": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.segment.then", "StringEquals": "REMIND", "Next": "SendReminder" },
+        { "Variable": "$.segment.then", "StringEquals": "ESCALATE", "Next": "Escalate" },
+        { "Variable": "$.segment.then", "StringEquals": "EXPIRE", "Next": "ExpireCase" }
+      ],
+      "Default": "UnknownSegment"
+    },
+    "SendReminder": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${actions_arn}", "Payload": { "action": "REMIND", "task.$": "$.task", "idx.$": "$.idx" } },
+      "ResultPath": null,
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"], "IntervalSeconds": 5, "MaxAttempts": 5, "BackoffRate": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PublishWorkflowFailed" }],
+      "Next": "NextSegment"
+    },
+    "Escalate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${actions_arn}", "Payload": { "action": "ESCALATE", "task.$": "$.task", "idx.$": "$.idx" } },
+      "ResultPath": null,
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"], "IntervalSeconds": 5, "MaxAttempts": 5, "BackoffRate": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PublishWorkflowFailed" }],
+      "Next": "NextSegment"
+    },
+    "NextSegment": {
+      "Type": "Pass",
+      "Parameters": { "task.$": "$.task", "plan.$": "$.plan", "idx.$": "States.MathAdd($.idx, 1)" },
+      "Next": "SelectSegment"
+    },
+    "ExpireCase": {
+      "Type": "Task",
+      "Comment": "Last step of the ladder: close the paused case as REFERRED through the agent (workflow principal). Never approves or declines.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${resume_arn}", "Payload": { "task.$": "$.task" } },
+      "ResultSelector": { "expire.$": "$.Payload" },
+      "ResultPath": "$.expiry",
+      "Retry": [{ "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"], "IntervalSeconds": 10, "MaxAttempts": 5, "BackoffRate": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PublishExpireFailed" }],
+      "Next": "ExpiredOrDecided"
+    },
+    "ExpiredOrDecided": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.expiry.expire.skipped", "BooleanEquals": true, "Next": "UseRecordedOutcome" }],
+      "Default": "PublishExpired"
+    },
+    "UseRecordedOutcome": {
+      "Type": "Pass",
+      "Comment": "A reviewer decided in the instant before expiry: publish that outcome instead.",
+      "Parameters": { "task.$": "$.task", "outcome.$": "$.expiry.expire.outcome" },
+      "Next": "PublishCompleted"
+    },
+    "PublishCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [{
+          "EventBusName": "${bus_name}",
+          "Source": "uw.underwriting",
+          "DetailType": "ReviewCompleted",
+          "Detail": {
+            "application_id.$": "$.task.application_id",
+            "tier.$": "$.task.tier",
+            "round.$": "$.task.round",
+            "session_id.$": "$.task.session_id",
+            "outcome.$": "$.outcome"
+          }
+        }]
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "PublishExpired": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [{
+          "EventBusName": "${bus_name}",
+          "Source": "uw.underwriting",
+          "DetailType": "ReviewExpired",
+          "Detail": {
+            "application_id.$": "$.task.application_id",
+            "tier.$": "$.task.tier",
+            "round.$": "$.task.round",
+            "session_id.$": "$.task.session_id",
+            "decision.$": "$.expiry.expire.decision"
+          }
+        }]
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "PublishExpireFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [{
+          "EventBusName": "${bus_name}",
+          "Source": "uw.underwriting",
+          "DetailType": "ReviewExpireFailed",
+          "Detail": {
+            "application_id.$": "$.task.application_id",
+            "tier.$": "$.task.tier",
+            "session_id.$": "$.task.session_id",
+            "error.$": "$.error.Error"
+          }
+        }]
+      },
+      "ResultPath": null,
+      "Next": "ExpireFailed"
+    },
+    "PublishWorkflowFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [{
+          "EventBusName": "${bus_name}",
+          "Source": "uw.underwriting",
+          "DetailType": "ReviewWorkflowFailed",
+          "Detail": {
+            "application_id.$": "$.task.application_id",
+            "tier.$": "$.task.tier",
+            "session_id.$": "$.task.session_id",
+            "error.$": "$.error.Error"
+          }
+        }]
+      },
+      "ResultPath": null,
+      "Next": "WorkflowFailed"
+    },
+    "ExpireFailed": { "Type": "Fail", "Error": "ExpireFailed", "Cause": "The paused case could not be closed after the deadline; a person must intervene." },
+    "WorkflowFailed": { "Type": "Fail", "Error": "WorkflowFailed", "Cause": "An approval-workflow step failed after retries; the review task is still open." },
+    "UnknownSegment": { "Type": "Fail", "Error": "UnknownSegment", "Cause": "Schedule contained an action this workflow does not know." }
+  }
+}

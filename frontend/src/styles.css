@@ -1,0 +1,25 @@
+:root { --bg:#f6f7f9; --fg:#1a1f2b; --card:#fff; --accent:#0b5fff; --danger:#c62828; --border:#dfe3ea; }
+@media (prefers-color-scheme: dark) { :root { --bg:#12151c; --fg:#e8ebf2; --card:#1b2030; --accent:#6ea0ff; --border:#2c3347; } }
+* { box-sizing: border-box; }
+body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+header { display:flex; gap:1rem; align-items:center; padding:.75rem 1.25rem; background:var(--card); border-bottom:1px solid var(--border); }
+header span { margin-left:auto; opacity:.7; font-size:.9rem; }
+main { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; display:grid; gap:1rem; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1rem 1.25rem; }
+label { display:block; margin:.6rem 0; font-size:.9rem; }
+input, select, textarea { width:100%; padding:.5rem; margin-top:.25rem; border:1px solid var(--border); border-radius:6px; background:transparent; color:inherit; }
+button { padding:.55rem 1rem; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; margin-right:.5rem; }
+button.danger { background:var(--danger); } button.link { background:none; color:var(--accent); }
+button:disabled { opacity:.5; cursor:wait; }
+.badge { padding:.1rem .5rem; border-radius:99px; font-size:.75rem; background:var(--border); }
+.badge.high, .badge.referred { background:#f8d7da; color:#7a1620; } .badge.low, .badge.completed { background:#d4edda; color:#155724; }
+.badge.medium, .badge.pending_approval { background:#fff3cd; color:#7a5b00; }
+.memo { white-space: pre-wrap; } .err { color: var(--danger); } .hint { opacity:.7; }
+pre { overflow:auto; font-size:.8rem; } table { width:100%; border-collapse:collapse; font-size:.85rem; }
+th, td { text-align:left; padding:.4rem; border-bottom:1px solid var(--border); }
+.center { text-align:center; margin-top:20vh; }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.chips { display:flex; flex-wrap:wrap; gap:.4rem; margin:.5rem 0; }
+.chip { display:inline-flex; align-items:center; gap:.3rem; margin:0; padding:.25rem .6rem; border:1px solid var(--border); border-radius:99px; font-size:.75rem; cursor:pointer; }
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.chip input { width:auto; margin:0; }

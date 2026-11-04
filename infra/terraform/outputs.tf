@@ -1,0 +1,22 @@
+# Root outputs used by deployment steps (URLs, ARNs, state machine, event bus).
+output "name_prefix"            { value = local.name }
+output "region"                 { value = var.region }
+output "ecr_repository_url"     { value = module.ecr.repository_url }
+output "frontend_bucket"        { value = module.frontend.bucket_name }
+output "frontend_distribution"  { value = module.frontend.distribution_id }
+output "frontend_url"           { value = "https://${module.frontend.domain_name}" }
+output "api_url"                { value = module.bff.api_url }
+output "cognito_domain"         { value = module.cognito.hosted_ui_domain }
+output "cognito_authority"      { value = module.cognito.issuer }
+output "spa_client_id"          { value = module.cognito.spa_client_id }
+output "knowledge_base_id"      { value = module.knowledge_base.knowledge_base_id }
+output "kb_data_source_id"      { value = module.knowledge_base.data_source_id }
+output "kb_docs_bucket"         { value = module.knowledge_base.docs_bucket }
+output "gateway_url"            { value = module.agentcore.gateway_url }
+output "gateway_arn"            { value = module.agentcore.gateway_arn }
+output "policy_engine_id"       { value = module.agentcore.policy_engine_id }
+output "runtime_arn"            { value = module.agentcore.runtime_arn }
+output "dashboard_name"          { value = module.observability.dashboard_name }
+output "bedrock_model_id"         { value = var.bedrock_model_id }
+output "approval_state_machine_arn" { value = module.approval_workflow.state_machine_arn }
+output "event_bus_name" { value = module.approval_workflow.event_bus_name }

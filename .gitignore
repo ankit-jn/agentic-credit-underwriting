@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate*
+.build/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+frontend/dist/
+.env
+.env.local

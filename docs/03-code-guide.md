@@ -1,7 +1,5 @@
 # UW-Agent: Code Guide (what each piece is for)
 
-Version 3. Read with `01-business-use-case.md` (why) and `02-design-document.md` (how). This guide answers one question per file: **what is this for, and what must it never do?** Every source file also starts with a purpose note or docstring that says the same thing.
-
 ## 1. Reading order
 1. `backend/agent/app/graph.py` (the workflow), `state.py` (its data), `confidence.py` (who decides what).
 2. `backend/agent/app/nodes/` (each step), `main.py` (the entrypoint and authorization).

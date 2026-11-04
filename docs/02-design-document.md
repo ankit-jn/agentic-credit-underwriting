@@ -1,7 +1,5 @@
 # Design Document — UW-Agent (Agentic SME Credit Underwriting)
 
-Status: Draft v3 (adds the durable human-approval workflow: Step Functions + EventBridge; v2 added human-in-the-loop and observability) · Region: configurable (default `us-east-1`; verify AgentCore and model availability for your region before deploying)
-
 ## 1. Goals / non-goals
 **Goals** – an enterprise-grade reference implementation that exercises every Amazon Bedrock AgentCore building block (Runtime, Memory, Identity, Gateway, Policy, Observability) with a LangGraph-orchestrated agent; Lambda + REST tools exposed over MCP; a Bedrock Knowledge Base on S3; Cognito OAuth; Terraform; GitHub Actions CI/CD; **a rigorous human-review and feedback loop; end-to-end observability**.
 **Non-goals** – a production credit model; the scoring, bureau and sanctions data are synthetic.

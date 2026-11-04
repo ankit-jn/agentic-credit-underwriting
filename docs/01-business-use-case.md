@@ -1,7 +1,5 @@
 # Business Use Case — Agentic SME Credit Underwriting ("UW-Agent")
 
-Version 3 — adds durable, long-running human approvals (Step Functions + EventBridge): reminders, escalation and safe expiry. (v2: human-in-the-loop operating model, feedback loop, observability.)
-
 ## 1. Context
 A mid-size bank/NBFC underwrites small-business (SME) working-capital loans of 5 lakh–5 crore (≈ USD 6K–600K). Today an underwriter assembles each case by hand across five systems, reads internal policy PDFs, and writes a credit memo. Typical turnaround is **5–7 working days**, of which **~60 % is data gathering and reconciliation**, not judgement.
 

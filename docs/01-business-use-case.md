@@ -15,7 +15,7 @@ A mid-size bank/NBFC underwrites small-business (SME) working-capital loans of 5
 | Reviews can sit for days with nobody nudged, escalated or accountable | Missed SLAs, stale cases, customers waiting, no audit trail of who was told what and when |
 
 ## 3. Proposed solution
-An **agentic** that receives a loan application and autonomously:
+An **agentic assistant** that receives a loan application and autonomously:
 1. Screens the applicant against watchlists / checks KYC status (**Tool 1 – Lambda**).
 2. Pulls the bureau score from the external credit bureau (**Tool 2 – REST API, OAuth-protected**).
 3. Analyses 6–12 months of bank transactions and computes cash-flow and DSCR metrics (**Tool 3 – Lambda**).

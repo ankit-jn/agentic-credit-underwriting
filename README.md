@@ -28,7 +28,7 @@ scripts/             bootstrap_state.sh · seed_data.py · apply_policies.py · 
 
 Try the demo applicants: **APP-1001** (clean → human approval or auto), **APP-1002** (thin cash flow), **APP-1003** (sanctions hit → compliance referral), **APP-1004** (KYC pending).
 
-Docs: `docs/01-business-use-case.md` (why), `docs/02-design-document.md` (how), `docs/03-code-guide.md` (what each file is for).
+Docs: `docs/01-business-use-case.md` (why), `docs/02-design-document.md` (how), `docs/03-code-guide.md` (what each file is for), `docs/04-architecture.png` (cloud architecture).
 
 ## Long-running approvals (Step Functions + EventBridge)
 * Every blocking review starts a Step Functions workflow that waits for the reviewer, sends reminders, escalates twice (tier lead, head of credit) and finally **expires the case as REFERRED**; it can never approve or decline. See design doc 5.8 and use case 4.7.
